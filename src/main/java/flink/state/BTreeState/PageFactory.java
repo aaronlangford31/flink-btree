@@ -1,18 +1,27 @@
 package flink.state.BTreeState;
 
+import flink.state.BTreeState.serializers.DeepCloneable;
 import org.apache.flink.api.java.tuple.Tuple2;
 
 import java.util.ArrayList;
 
-public class PageFactory<K extends Comparable, V> {
+public class PageFactory<K extends Comparable & DeepCloneable, V> {
     private long mostRecentPageId;
     private final int internalPageCapacity;
     private final int leafPageCapacity;
 
     public PageFactory() {
         this.mostRecentPageId = 0;
-        this.internalPageCapacity = 0;
-        this.leafPageCapacity = 0;
+        this.internalPageCapacity = 4096;
+        this.leafPageCapacity = 4096;
+    }
+
+    public InternalBTreePage<K> getEmptyRootPage() {
+        return new InternalBTreePage<>(PageId.getRootPageId(),
+                PageId.getRootPageId(),
+                new ArrayList<>(this.internalPageCapacity),
+                PageType.INTERNAL,
+                this.internalPageCapacity);
     }
 
     public InternalBTreePage<K> getNewRootPage(Iterable<InternalBTreePage<K>> childPages) {
@@ -21,7 +30,20 @@ public class PageFactory<K extends Comparable, V> {
             childKeys.add(new BTreeInternalNode<>(childPage.getFirstKey(), childPage.getPageId()));
         }
 
-        return new InternalBTreePage<>(PageId.getRootPageId(), PageId.getRootPageId(), childKeys, PageType.INTERNAL, this.internalPageCapacity);
+        return new InternalBTreePage<>(PageId.getRootPageId(),
+                PageId.getRootPageId(),
+                childKeys,
+                PageType.INTERNAL,
+                this.internalPageCapacity);
+    }
+
+    public LeafBTreePage<K, V> getNewLeafPage(PageId parentId, K key, V value) {
+        PageId newPageId = this.makeNewPageId();
+
+        ArrayList<BTreeLeafNode<K, V>> nodes = new ArrayList<>(this.leafPageCapacity);
+        nodes.add(new BTreeLeafNode<>(key, value));
+
+        return new LeafBTreePage<K, V>(newPageId, parentId, null, null, nodes, this.leafPageCapacity);
     }
 
     public Tuple2<LeafBTreePage<K, V>, LeafBTreePage<K, V>> split(LeafBTreePage<K, V> page) {

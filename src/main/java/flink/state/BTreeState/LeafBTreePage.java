@@ -1,6 +1,5 @@
 package flink.state.BTreeState;
 
-import com.sun.org.apache.regexp.internal.RECompiler;
 import org.apache.flink.api.java.tuple.Tuple2;
 
 import java.util.ArrayList;

@@ -1,5 +1,7 @@
 package flink.state.BTreeState;
 
+import flink.state.BTreeState.serializers.DeepCloneable;
+import org.apache.flink.api.common.functions.RuntimeContext;
 import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -11,17 +13,47 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
-public class BTreeState<K extends Comparable, V> {
-    private PageFactory<K, V> pageFactory;
+public class BTreeState<K extends Comparable & DeepCloneable, V> {
+    private ValueState<PageFactory<K, V>> pageFactory;
 
     private ValueState<InternalBTreePage<K>> rootPage;
     private MapState<PageId, InternalBTreePage<K>> internalPages;
     private MapState<PageId, LeafBTreePage<K, V>> leafPages;
 
+    public BTreeState(RuntimeContext context, BTreeStateDescriptor<K, V> stateDescriptor) throws IOException {
+        this.pageFactory = context.getState(stateDescriptor.getPageFactoryDescriptor());
+        if (this.pageFactory.value() == null) {
+            this.pageFactory.update(new PageFactory<>());
+        }
+
+        this.rootPage = context.getState(stateDescriptor.getRootPageDescriptor());
+        if (this.rootPage.value() == null) {
+            this.rootPage.update(this.pageFactory.value().getEmptyRootPage());
+        }
+
+        this.internalPages = context.getMapState(stateDescriptor.getInternalPageMapDescriptor());
+        this.leafPages = context.getMapState(stateDescriptor.getLeafPageMapDescriptor());
+    }
+
     public void insert(K key, V value) {
         // find where the key should go
         try {
             InternalBTreePage<K> currPage = this.rootPage.value();
+
+            // if the root page is empty
+            if (currPage.isEmpty()) {
+                // create a new leaf page
+                LeafBTreePage<K, V> newLeafPage = this.pageFactory.value().getNewLeafPage(currPage.getPageId(), key, value);
+
+                // add leaf page to parent
+                currPage.insert(key, newLeafPage.getPageId());
+
+                // update the root page
+                this.rootPage.update(currPage);
+                // insert the new leaf page
+                this.leafPages.put(newLeafPage.getPageId(), newLeafPage);
+                return;
+            }
 
             while (currPage.getChildrenType() != PageType.LEAF) {
                 Optional<PageId> childId = currPage.findPage(key);
@@ -153,7 +185,7 @@ public class BTreeState<K extends Comparable, V> {
             parentPage = this.internalPages.get(parentPageId);
         }
 
-        Tuple2<LeafBTreePage<K, V>, LeafBTreePage<K, V>> splitPages = this.pageFactory.split(page);
+        Tuple2<LeafBTreePage<K, V>, LeafBTreePage<K, V>> splitPages = this.pageFactory.value().split(page);
         LeafBTreePage<K, V> newLeafPage = splitPages.f1;
 
         // if the parent page has capacity, just insert the new page key into it
@@ -228,7 +260,7 @@ public class BTreeState<K extends Comparable, V> {
             parentPage = this.internalPages.get(parentPageId);
         }
 
-        Tuple2<InternalBTreePage<K>, InternalBTreePage<K>> splitInternalPages = pageFactory.split(page);
+        Tuple2<InternalBTreePage<K>, InternalBTreePage<K>> splitInternalPages = pageFactory.value().split(page);
         InternalBTreePage<K> newInternalPage = splitInternalPages.f1;
 
         // if parent page has capacity, just insert the new key
@@ -290,10 +322,10 @@ public class BTreeState<K extends Comparable, V> {
 
     private Tuple2<InternalBTreePage<K>, InternalBTreePage<K>> splitRootPage() throws Exception {
         // split the root into two internal pages, assigning new ids to the split pages
-        Tuple2<InternalBTreePage<K>, InternalBTreePage<K>> splitInternalPages = this.pageFactory.split(this.rootPage.value(), true);
+        Tuple2<InternalBTreePage<K>, InternalBTreePage<K>> splitInternalPages = this.pageFactory.value().split(this.rootPage.value(), true);
 
         // get a new root page, inserting the split root pages into that page
-        InternalBTreePage<K> newRoot = this.pageFactory.getNewRootPage(Arrays.asList(splitInternalPages.f0, splitInternalPages.f1));
+        InternalBTreePage<K> newRoot = this.pageFactory.value().getNewRootPage(Arrays.asList(splitInternalPages.f0, splitInternalPages.f1));
 
         // insert new pages into internalPages map
         this.internalPages.put(splitInternalPages.f0.getPageId(), splitInternalPages.f0);

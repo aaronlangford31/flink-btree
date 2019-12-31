@@ -1,18 +1,23 @@
 package flink.state.BTreeState;
 
+import flink.state.BTreeState.serializers.DeepCloneable;
 import org.apache.flink.api.java.tuple.Tuple2;
 
 import java.util.ArrayList;
 import java.util.Optional;
 
-public class InternalBTreePage<T extends Comparable> {
+public class InternalBTreePage<T extends Comparable & DeepCloneable> implements DeepCloneable {
     private PageId pageId;
     private PageId parentPageId;
     private ArrayList<BTreeInternalNode<T>> nodes;
     private PageType childrenType;
     private int capacity;
 
-    public InternalBTreePage(PageId id, PageId parentPageId, ArrayList<BTreeInternalNode<T>> nodes, PageType childrenType, int capacity) {
+    public InternalBTreePage(PageId id,
+                             PageId parentPageId,
+                             ArrayList<BTreeInternalNode<T>> nodes,
+                             PageType childrenType,
+                             int capacity) {
         if (nodes == null || nodes.size() == 0) {
             throw new IllegalArgumentException("Tried to initialize internal BTree page without any children");
         }
@@ -24,8 +29,20 @@ public class InternalBTreePage<T extends Comparable> {
         this.capacity = capacity;
     }
 
+    public InternalBTreePage(PageType childrenType, int capacity) {
+        this.parentPageId = PageId.getRootPageId();
+        this.pageId = PageId.getRootPageId();
+        this.nodes = new ArrayList<>(capacity);
+        this.childrenType = childrenType;
+        this.capacity = capacity;
+    }
+
     public boolean hasCapacity() {
         return this.capacity < this.nodes.size();
+    }
+
+    public boolean isEmpty() {
+        return this.nodes.isEmpty();
     }
 
     public PageId getParentPageId() {
@@ -109,6 +126,27 @@ public class InternalBTreePage<T extends Comparable> {
         return childrenType;
     }
 
+    public PageId getFirstChildPageId() {
+        return this.nodes.get(0).getChildPage();
+    }
+
+    @Override
+    public Object clone() {
+        ArrayList<BTreeInternalNode<T>> copiedNodes = new ArrayList<>(this.nodes.size());
+
+        for (BTreeInternalNode<T> node : this.nodes) {
+            copiedNodes.add((BTreeInternalNode<T>)node.clone());
+        }
+
+        return new InternalBTreePage<T>(
+                (PageId)this.pageId.clone(),
+                (PageId)this.parentPageId.clone(),
+                copiedNodes,
+                this.childrenType,
+                this.capacity
+        );
+    }
+
     private boolean isBefore(T it, T that) {
         return it.compareTo(that) < 0;
     }
@@ -151,9 +189,5 @@ public class InternalBTreePage<T extends Comparable> {
         } else {
             return Tuple2.of(pivotIx, false);
         }
-    }
-
-    public PageId getFirstChildPageId() {
-        return this.nodes.get(0).getChildPage();
     }
 }
