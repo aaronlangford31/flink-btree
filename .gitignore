@@ -1,0 +1,12 @@
+bin/
+project/target/
+target/
+build/
+.idea/
+
+*.log
+*.iml
+*.ipr
+*.iws
+
+*.class
