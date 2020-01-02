@@ -1,11 +1,10 @@
 package flink.state.BTreeState;
 
-import flink.state.BTreeState.serializers.DeepCloneable;
 import org.apache.flink.api.java.tuple.Tuple2;
 
 import java.util.ArrayList;
 
-public class PageFactory<K extends Comparable & DeepCloneable, V> {
+public class PageFactory<K extends Comparable, V> {
     private long mostRecentPageId;
     private final int internalPageCapacity;
     private final int leafPageCapacity;
@@ -16,11 +15,17 @@ public class PageFactory<K extends Comparable & DeepCloneable, V> {
         this.leafPageCapacity = 4096;
     }
 
+    public PageFactory(int internalPageCapacity, int leafPageCapacity) {
+        this.mostRecentPageId = 0;
+        this.internalPageCapacity = internalPageCapacity;
+        this.leafPageCapacity = leafPageCapacity;
+    }
+
     public InternalBTreePage<K> getEmptyRootPage() {
         return new InternalBTreePage<>(PageId.getRootPageId(),
                 PageId.getRootPageId(),
                 new ArrayList<>(this.internalPageCapacity),
-                PageType.INTERNAL,
+                PageType.LEAF,
                 this.internalPageCapacity);
     }
 
@@ -43,7 +48,7 @@ public class PageFactory<K extends Comparable & DeepCloneable, V> {
         ArrayList<BTreeLeafNode<K, V>> nodes = new ArrayList<>(this.leafPageCapacity);
         nodes.add(new BTreeLeafNode<>(key, value));
 
-        return new LeafBTreePage<K, V>(newPageId, parentId, null, null, nodes, this.leafPageCapacity);
+        return new LeafBTreePage<>(newPageId, parentId, null, null, nodes, this.leafPageCapacity);
     }
 
     public Tuple2<LeafBTreePage<K, V>, LeafBTreePage<K, V>> split(LeafBTreePage<K, V> page) {

@@ -37,13 +37,13 @@ public class LeafBTreePage<K extends Comparable, V> {
         return nodes.size() == 0;
     }
 
-    public Optional<V> get(K key) {
+    public V get(K key) {
         Tuple2<Integer, Boolean> searchResult = this.search(key);
 
-        if (searchResult.f1) {
-            return Optional.empty();
+        if (!searchResult.f1) {
+            return null;
         } else {
-            return Optional.of(this.nodes.get(searchResult.f0).getValue());
+            return this.nodes.get(searchResult.f0).getValue();
         }
     }
 
@@ -102,11 +102,11 @@ public class LeafBTreePage<K extends Comparable, V> {
         return this.parentPageId;
     }
 
-    public Optional<K> getFirstKey() {
+    public K getFirstKey() {
         if (this.isEmpty()) {
-            return Optional.empty();
+            return null;
         } else {
-            return Optional.of(this.nodes.get(0).getKey());
+            return this.nodes.get(0).getKey();
         }
 
     }
@@ -162,8 +162,12 @@ public class LeafBTreePage<K extends Comparable, V> {
 
         if (key.equals(pivotKey)) {
             return Tuple2.of(pivotIx, true);
-        } else {
+        } else if (isBefore(key, pivotKey)){
+            // search failed, but the key belongs before the item currently in the index that we failed at
             return Tuple2.of(pivotIx, false);
+        } else {
+            // search failed, but the key belongs after then item currently in the index that we failed at
+            return Tuple2.of(pivotIx + 1, false);
         }
     }
 

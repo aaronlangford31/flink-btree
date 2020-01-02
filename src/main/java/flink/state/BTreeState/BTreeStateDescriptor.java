@@ -1,17 +1,14 @@
 package flink.state.BTreeState;
 
-import flink.state.BTreeState.serializers.DeepCloneable;
-import flink.state.BTreeState.serializers.SerializerFactory;
 import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 
-public class BTreeStateDescriptor<K extends Comparable & DeepCloneable, V> {
+public class BTreeStateDescriptor<K extends Comparable, V> {
     private final String stateName;
     private final TypeInformation<K> keyTypeInformation;
     private final TypeInformation<V> valueTypeInformation;
-    private final SerializerFactory<K, V> serializerFactory;
 
     public BTreeStateDescriptor(String stateName,
                                 TypeInformation<K> keyTypeInformation,
@@ -20,8 +17,6 @@ public class BTreeStateDescriptor<K extends Comparable & DeepCloneable, V> {
         this.stateName = stateName;
         this.keyTypeInformation = keyTypeInformation;
         this.valueTypeInformation = valueTypeInformation;
-
-        this.serializerFactory = new SerializerFactory<>();
     }
 
     public ValueStateDescriptor<InternalBTreePage<K>> getRootPageDescriptor() {

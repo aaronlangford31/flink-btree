@@ -1,6 +1,5 @@
 package flink.state.BTreeState;
 
-import flink.state.BTreeState.serializers.DeepCloneable;
 import org.apache.flink.api.common.functions.RuntimeContext;
 import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.ValueState;
@@ -13,7 +12,7 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
-public class BTreeState<K extends Comparable & DeepCloneable, V> {
+public class BTreeState<K extends Comparable, V> {
     private ValueState<PageFactory<K, V>> pageFactory;
 
     private ValueState<InternalBTreePage<K>> rootPage;
@@ -85,7 +84,7 @@ public class BTreeState<K extends Comparable & DeepCloneable, V> {
                 // if we changed the first key in the leaf
                 if (maybeOldKey.isPresent()) {
                     // we need to percolate the change up the tree
-                    this.percolateKey(maybeOldKey.get(), leafPage.getFirstKey().get(), leafPage);
+                    this.percolateKey(maybeOldKey.get(), leafPage.getFirstKey(), leafPage);
                 }
             } else {
                 // split the page
@@ -94,14 +93,14 @@ public class BTreeState<K extends Comparable & DeepCloneable, V> {
                 // determine which split to use:
                 // if the key is before the second of the split pages,
                 // then it belongs in the first page
-                if (isBefore(key, splitPages.f1.getFirstKey().get())) {
+                if (isBefore(key, splitPages.f1.getFirstKey())) {
                     Optional<K> maybeOldKey = splitPages.f0.put(key, value);
 
                     // update this leaf page in state
                     this.leafPages.put(splitPages.f0.getPageId(), splitPages.f0);
 
                     if (maybeOldKey.isPresent()) {
-                        this.percolateKey(maybeOldKey.get(), splitPages.f0.getFirstKey().get(), splitPages.f0);
+                        this.percolateKey(maybeOldKey.get(), splitPages.f0.getFirstKey(), splitPages.f0);
                     }
                 } else {
                     // else it belongs in the second page
@@ -111,7 +110,7 @@ public class BTreeState<K extends Comparable & DeepCloneable, V> {
                     this.leafPages.put(splitPages.f1.getPageId(), splitPages.f1);
 
                     if (maybeOldKey.isPresent()) {
-                        this.percolateKey(maybeOldKey.get(), splitPages.f1.getFirstKey().get(), splitPages.f1);
+                        this.percolateKey(maybeOldKey.get(), splitPages.f1.getFirstKey(), splitPages.f1);
                     }
                 }
             }
@@ -122,14 +121,18 @@ public class BTreeState<K extends Comparable & DeepCloneable, V> {
         }
     }
 
-    public Optional<V> get(K key) throws Exception {
+    public V get(K key) throws Exception {
         InternalBTreePage<K> currPage = this.rootPage.value();
+
+        if (currPage.isEmpty()) {
+            return null;
+        }
 
         while (currPage.getChildrenType() != PageType.LEAF) {
             Optional<PageId> childId = currPage.findPage(key);
 
             if (!childId.isPresent()) {
-                return Optional.empty();
+                return null;
             }
 
             currPage = internalPages.get(childId.get());
@@ -166,8 +169,9 @@ public class BTreeState<K extends Comparable & DeepCloneable, V> {
         return new RecordIterator(this, leafPage, lower, upper);
     }
 
-    public Iterator<V> getAllValues() {
-        throw new NotImplementedException();
+    public Iterator<V> getAllValues() throws Exception {
+        LeafBTreePage<K, V> leftLeaf = this.getLeftmostOf(this.rootPage.value());
+        return new RecordIterator(this, leftLeaf, leftLeaf.getFirstKey(), null);
     }
 
     private LeafBTreePage<K, V> getLeafPage(PageId pageId) throws Exception {
@@ -191,7 +195,7 @@ public class BTreeState<K extends Comparable & DeepCloneable, V> {
         // if the parent page has capacity, just insert the new page key into it
         if (parentPage.hasCapacity()) {
             // the left page already is in the parent, only need to insert the right
-            K newKey = newLeafPage.getFirstKey().get();
+            K newKey = newLeafPage.getFirstKey();
             PageId newPageId = newLeafPage.getPageId();
 
             parentPage.insert(newKey, newPageId);
@@ -207,12 +211,12 @@ public class BTreeState<K extends Comparable & DeepCloneable, V> {
             InternalBTreePage<K> leftRootSplit = splitRootPages.f0;
             InternalBTreePage<K> rightRootSplit = splitRootPages.f1;
 
-            if (isBefore(newLeafPage.getFirstKey().get(), rightRootSplit.getFirstKey())) {
-                leftRootSplit.insert(newLeafPage.getFirstKey().get(), newLeafPage.getPageId());
+            if (isBefore(newLeafPage.getFirstKey(), rightRootSplit.getFirstKey())) {
+                leftRootSplit.insert(newLeafPage.getFirstKey(), newLeafPage.getPageId());
 
                 this.internalPages.put(leftRootSplit.getPageId(), leftRootSplit);
             } else {
-                rightRootSplit.insert(newLeafPage.getFirstKey().get(), newLeafPage.getPageId());
+                rightRootSplit.insert(newLeafPage.getFirstKey(), newLeafPage.getPageId());
 
                 this.internalPages.put(rightRootSplit.getPageId(), rightRootSplit);
             }
@@ -227,13 +231,13 @@ public class BTreeState<K extends Comparable & DeepCloneable, V> {
             // new internal page.
             // if key of new leaf page is before the new internal page
             // then insert into the old internal page
-            if (isBefore(newLeafPage.getFirstKey().get(), newInternalPage.getFirstKey())) {
-                splitInternalPages.f0.insert(newLeafPage.getFirstKey().get(), newLeafPage.getPageId());
+            if (isBefore(newLeafPage.getFirstKey(), newInternalPage.getFirstKey())) {
+                splitInternalPages.f0.insert(newLeafPage.getFirstKey(), newLeafPage.getPageId());
                 // update page in state
                 this.internalPages.put(splitInternalPages.f0.getPageId(), splitInternalPages.f0);
             } else {
                 // else it belongs in the second page
-                newInternalPage.insert(newLeafPage.getFirstKey().get(), newLeafPage.getPageId());
+                newInternalPage.insert(newLeafPage.getFirstKey(), newLeafPage.getPageId());
                 // need to update the page parent id
                 newLeafPage.setParentPageId(newInternalPage.getPageId());
 

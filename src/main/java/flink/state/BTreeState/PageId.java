@@ -1,10 +1,8 @@
 package flink.state.BTreeState;
 
-import flink.state.BTreeState.serializers.DeepCloneable;
-
 import java.util.Objects;
 
-public class PageId implements DeepCloneable {
+public class PageId {
     private long id;
 
     public static PageId getRootPageId() {
@@ -40,10 +38,5 @@ public class PageId implements DeepCloneable {
     @Override
     public int hashCode() {
         return Objects.hash(id);
-    }
-
-    @Override
-    public Object clone() {
-        return new PageId(this.id);
     }
 }

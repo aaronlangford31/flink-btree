@@ -1,12 +1,11 @@
 package flink.state.BTreeState;
 
-import flink.state.BTreeState.serializers.DeepCloneable;
 import org.apache.flink.api.java.tuple.Tuple2;
 
 import java.util.ArrayList;
 import java.util.Optional;
 
-public class InternalBTreePage<T extends Comparable & DeepCloneable> implements DeepCloneable {
+public class InternalBTreePage<T extends Comparable> {
     private PageId pageId;
     private PageId parentPageId;
     private ArrayList<BTreeInternalNode<T>> nodes;
@@ -18,10 +17,6 @@ public class InternalBTreePage<T extends Comparable & DeepCloneable> implements 
                              ArrayList<BTreeInternalNode<T>> nodes,
                              PageType childrenType,
                              int capacity) {
-        if (nodes == null || nodes.size() == 0) {
-            throw new IllegalArgumentException("Tried to initialize internal BTree page without any children");
-        }
-
         this.pageId = id;
         this.parentPageId = parentPageId;
         this.nodes = nodes;
@@ -29,16 +24,8 @@ public class InternalBTreePage<T extends Comparable & DeepCloneable> implements 
         this.capacity = capacity;
     }
 
-    public InternalBTreePage(PageType childrenType, int capacity) {
-        this.parentPageId = PageId.getRootPageId();
-        this.pageId = PageId.getRootPageId();
-        this.nodes = new ArrayList<>(capacity);
-        this.childrenType = childrenType;
-        this.capacity = capacity;
-    }
-
     public boolean hasCapacity() {
-        return this.capacity < this.nodes.size();
+        return this.nodes.size() < this.capacity;
     }
 
     public boolean isEmpty() {
@@ -100,6 +87,11 @@ public class InternalBTreePage<T extends Comparable & DeepCloneable> implements 
             throw new IllegalStateException("attempted to insert another node into full page");
         }
 
+        if (this.isEmpty()) {
+            insertAt(this.nodes, new BTreeInternalNode<T>(key, childPageId), 0);
+            return;
+        }
+
         Tuple2<Integer, Boolean> searchResult = search(key);
 
         if (searchResult.f1) {
@@ -130,22 +122,22 @@ public class InternalBTreePage<T extends Comparable & DeepCloneable> implements 
         return this.nodes.get(0).getChildPage();
     }
 
-    @Override
-    public Object clone() {
-        ArrayList<BTreeInternalNode<T>> copiedNodes = new ArrayList<>(this.nodes.size());
-
-        for (BTreeInternalNode<T> node : this.nodes) {
-            copiedNodes.add((BTreeInternalNode<T>)node.clone());
-        }
-
-        return new InternalBTreePage<T>(
-                (PageId)this.pageId.clone(),
-                (PageId)this.parentPageId.clone(),
-                copiedNodes,
-                this.childrenType,
-                this.capacity
-        );
-    }
+//    @Override
+//    public Object clone() {
+//        ArrayList<BTreeInternalNode<T>> copiedNodes = new ArrayList<>(this.nodes.size());
+//
+//        for (BTreeInternalNode<T> node : this.nodes) {
+//            copiedNodes.add((BTreeInternalNode<T>)node.clone());
+//        }
+//
+//        return new InternalBTreePage<T>(
+//                (PageId)this.pageId.clone(),
+//                (PageId)this.parentPageId.clone(),
+//                copiedNodes,
+//                this.childrenType,
+//                this.capacity
+//        );
+//    }
 
     private boolean isBefore(T it, T that) {
         return it.compareTo(that) < 0;
