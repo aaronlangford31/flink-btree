@@ -34,7 +34,7 @@ class BTreeStateSpec extends AnyWordSpec with Matchers {
       btree.insert("3rd", "third")
       btree.insert("2nd", "second")
 
-      "values should be in order" in {
+      "return all inserted values in order" in {
         btree.getAllValues.toSeq should contain theSameElementsInOrderAs Seq("first", "second", "third")
       }
     }

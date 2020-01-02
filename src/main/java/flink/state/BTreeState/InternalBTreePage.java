@@ -159,7 +159,16 @@ public class InternalBTreePage<T extends Comparable> {
         int pivotBegin = 0;
         int pivotEnd = this.nodes.size() - 1;
 
-        while (pivotEnd - pivotBegin > 0) {
+        T beginKey = this.nodes.get(pivotBegin).getKey();
+        T endKey = this.nodes.get(pivotEnd).getKey();
+
+        if (key.equals(beginKey)) {
+            return Tuple2.of(pivotBegin, true);
+        } else if (key.equals(endKey)) {
+            return Tuple2.of(pivotEnd, true);
+        }
+
+        while (pivotEnd - pivotBegin > 1) {
             int pivotIx = pivotBegin + ((pivotEnd - pivotBegin) / 2);
 
             T pivotKey = this.nodes.get(pivotIx).getKey();

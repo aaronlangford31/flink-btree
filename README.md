@@ -33,6 +33,8 @@ In order to accomplish this, we need a data structure in Flink which supports:
 - fast deletes
 - fast key look-ups
 - fast prefix scans
+- ability to spill to disk
+
 Since we're assuming a RocksDB state backend, we have to factor in serialization and RocksDB operations into the analysis for a good tool.
 
 A BTree/B+Tree is a classic solution to this kind of problem!
