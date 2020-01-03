@@ -107,14 +107,14 @@ public class BTreeState<K extends Comparable, V> {
                     }
                 } else {
                     // else it belongs in the second page
-                    Optional<K> maybeOldKey = splitPages.f1.put(key, value);
+                    splitPages.f1.put(key, value);
 
                     // update this leaf page in state
                     this.leafPages.put(splitPages.f1.getPageId(), splitPages.f1);
 
-                    if (maybeOldKey.isPresent()) {
-                        this.percolateKey(maybeOldKey.get(), splitPages.f1.getFirstKey(), splitPages.f1);
-                    }
+                    // we don't need to check if percolating the key is necessary here because
+                    // the right page would never have been selected if the new key would
+                    // be the first key in the right page.
                 }
             }
         } catch (IOException e) {
@@ -419,7 +419,7 @@ public class BTreeState<K extends Comparable, V> {
 
             this.rootPage.update(parentPage);
         } else {
-            parentPage = this.internalPages.get(page.getPageId());
+            parentPage = this.internalPages.get(parentPageId);
             Optional<K> maybeNewKey = parentPage.update(oldKey, newKey);
 
             this.internalPages.put(parentPageId, parentPage);
@@ -442,7 +442,7 @@ public class BTreeState<K extends Comparable, V> {
 
             this.rootPage.update(parentPage);
         } else {
-            parentPage = this.internalPages.get(page.getPageId());
+            parentPage = this.internalPages.get(parentPageId);
             Optional<K> maybeNewKey = parentPage.update(oldKey, newKey);
 
             this.internalPages.put(parentPageId, parentPage);
