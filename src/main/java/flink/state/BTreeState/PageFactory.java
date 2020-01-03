@@ -73,7 +73,7 @@ public class PageFactory<K extends Comparable, V> {
         InternalBTreePage<K> newPage = this.getNewInternalPage(page.getParentPageId(), newNodes, page.getChildrenType());
 
         if (assignNewIdToLeft) {
-            page.setParentPageId(this.makeNewPageId());
+            page.setPageId(this.makeNewPageId());
         }
 
         return Tuple2.of(page, newPage);

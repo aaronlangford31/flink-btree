@@ -1,4 +1,4 @@
-package flink.state.BTreeState.util;
+package flink.state.BTreeState.testutil;
 
 import org.apache.flink.api.common.state.ValueState;
 

@@ -4,7 +4,6 @@ import org.apache.flink.api.common.functions.RuntimeContext;
 import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.java.tuple.Tuple2;
-import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -20,9 +19,13 @@ public class BTreeState<K extends Comparable, V> {
     private MapState<PageId, LeafBTreePage<K, V>> leafPages;
 
     public BTreeState(RuntimeContext context, BTreeStateDescriptor<K, V> stateDescriptor) throws IOException {
+        this(context, stateDescriptor, 4096, 4096);
+    }
+
+    public BTreeState(RuntimeContext context, BTreeStateDescriptor<K, V> stateDescriptor, int internalPageCapacity, int leafPageCapacity) throws IOException {
         this.pageFactory = context.getState(stateDescriptor.getPageFactoryDescriptor());
         if (this.pageFactory.value() == null) {
-            this.pageFactory.update(new PageFactory<>());
+            this.pageFactory.update(new PageFactory<>(internalPageCapacity, leafPageCapacity));
         }
 
         this.rootPage = context.getState(stateDescriptor.getRootPageDescriptor());
@@ -213,10 +216,12 @@ public class BTreeState<K extends Comparable, V> {
 
             if (isBefore(newLeafPage.getFirstKey(), rightRootSplit.getFirstKey())) {
                 leftRootSplit.insert(newLeafPage.getFirstKey(), newLeafPage.getPageId());
+                newLeafPage.setParentPageId(leftRootSplit.getPageId());
 
                 this.internalPages.put(leftRootSplit.getPageId(), leftRootSplit);
             } else {
                 rightRootSplit.insert(newLeafPage.getFirstKey(), newLeafPage.getPageId());
+                newLeafPage.setParentPageId(rightRootSplit.getPageId());
 
                 this.internalPages.put(rightRootSplit.getPageId(), rightRootSplit);
             }
@@ -233,6 +238,8 @@ public class BTreeState<K extends Comparable, V> {
             // then insert into the old internal page
             if (isBefore(newLeafPage.getFirstKey(), newInternalPage.getFirstKey())) {
                 splitInternalPages.f0.insert(newLeafPage.getFirstKey(), newLeafPage.getPageId());
+                // need to update the page parent id
+                newLeafPage.setParentPageId(splitInternalPages.f0.getPageId());
                 // update page in state
                 this.internalPages.put(splitInternalPages.f0.getPageId(), splitInternalPages.f0);
             } else {
@@ -267,6 +274,25 @@ public class BTreeState<K extends Comparable, V> {
         Tuple2<InternalBTreePage<K>, InternalBTreePage<K>> splitInternalPages = pageFactory.value().split(page);
         InternalBTreePage<K> newInternalPage = splitInternalPages.f1;
 
+        // since a new internal page was created, the children need their parent ids updated
+        if (newInternalPage.getChildrenType() == PageType.INTERNAL) {
+            for (Iterator<PageId> it = newInternalPage.getChildrenPageIds(); it.hasNext(); ) {
+                PageId childPageId = it.next();
+
+                InternalBTreePage<K> childPage = this.internalPages.get(childPageId);
+                childPage.setParentPageId(newInternalPage.getPageId());
+                this.internalPages.put(childPageId, childPage);
+            }
+        } else {
+            for (Iterator<PageId> it = newInternalPage.getChildrenPageIds(); it.hasNext(); ) {
+                PageId childPageId = it.next();
+
+                LeafBTreePage<K, V> childPage = this.leafPages.get(childPageId);
+                childPage.setParentPageId(newInternalPage.getPageId());
+                this.leafPages.put(childPageId, childPage);
+            }
+        }
+
         // if parent page has capacity, just insert the new key
         if (parentPage.hasCapacity()) {
             parentPage.insert(newInternalPage.getFirstKey(), newInternalPage.getPageId());
@@ -284,11 +310,15 @@ public class BTreeState<K extends Comparable, V> {
 
             if (isBefore(newInternalPage.getFirstKey(), rightRootSplit.getFirstKey())) {
                 leftRootSplit.insert(newInternalPage.getFirstKey(), newInternalPage.getPageId());
-
+                // update pageId of the new internal page
+                newInternalPage.setParentPageId(leftRootSplit.getPageId());
+                // update the parent in state
                 this.internalPages.put(leftRootSplit.getPageId(), leftRootSplit);
             } else {
                 rightRootSplit.insert(newInternalPage.getFirstKey(), newInternalPage.getPageId());
-
+                // update pageId of the new internal page
+                newInternalPage.setParentPageId(rightRootSplit.getPageId());
+                // update the parent in state
                 this.internalPages.put(rightRootSplit.getPageId(), rightRootSplit);
             }
         } else {
@@ -305,14 +335,15 @@ public class BTreeState<K extends Comparable, V> {
             // then insert into the old parent internal page
             if (isBefore(newInternalPage.getFirstKey(), newParentInternalPage.getFirstKey())) {
                 oldParentInternalPage.insert(newInternalPage.getFirstKey(), newInternalPage.getPageId());
+                // need to update the page parent id
+                newInternalPage.setParentPageId(oldParentInternalPage.getPageId());
                 // update parent page in state
                 this.internalPages.put(oldParentInternalPage.getPageId(), oldParentInternalPage);
             } else {
                 // else it belongs in the second page
                 newParentInternalPage.insert(newInternalPage.getFirstKey(), newInternalPage.getPageId());
                 // need to update the page parent id
-                newInternalPage.setParentPageId(newInternalPage.getPageId());
-
+                newInternalPage.setParentPageId(newParentInternalPage.getPageId());
                 // update new page in state
                 this.internalPages.put(newParentInternalPage.getPageId(), newParentInternalPage);
             }
@@ -330,6 +361,42 @@ public class BTreeState<K extends Comparable, V> {
 
         // get a new root page, inserting the split root pages into that page
         InternalBTreePage<K> newRoot = this.pageFactory.value().getNewRootPage(Arrays.asList(splitInternalPages.f0, splitInternalPages.f1));
+
+        // since these pages got new parent IDs, child pages must be updated
+        if (splitInternalPages.f0.getChildrenType() == PageType.INTERNAL) {
+            for (Iterator<PageId> it = splitInternalPages.f0.getChildrenPageIds(); it.hasNext(); ) {
+                PageId childPageId = it.next();
+
+                InternalBTreePage<K> childPage = this.internalPages.get(childPageId);
+                childPage.setParentPageId(splitInternalPages.f0.getPageId());
+                this.internalPages.put(childPageId, childPage);
+            }
+
+            for (Iterator<PageId> it = splitInternalPages.f1.getChildrenPageIds(); it.hasNext(); ) {
+                PageId childPageId = it.next();
+
+                InternalBTreePage<K> childPage = this.internalPages.get(childPageId);
+                childPage.setParentPageId(splitInternalPages.f1.getPageId());
+                this.internalPages.put(childPageId, childPage);
+            }
+        } else {
+            for (Iterator<PageId> it = splitInternalPages.f0.getChildrenPageIds(); it.hasNext(); ) {
+                PageId childPageId = it.next();
+
+                LeafBTreePage<K, V> childPage = this.leafPages.get(childPageId);
+                childPage.setParentPageId(splitInternalPages.f0.getPageId());
+                this.leafPages.put(childPageId, childPage);
+            }
+
+            for (Iterator<PageId> it = splitInternalPages.f1.getChildrenPageIds(); it.hasNext(); ) {
+                PageId childPageId = it.next();
+
+                LeafBTreePage<K, V> childPage = this.leafPages.get(childPageId);
+                childPage.setParentPageId(splitInternalPages.f1.getPageId());
+                this.leafPages.put(childPageId, childPage);
+            }
+        }
+
 
         // insert new pages into internalPages map
         this.internalPages.put(splitInternalPages.f0.getPageId(), splitInternalPages.f0);

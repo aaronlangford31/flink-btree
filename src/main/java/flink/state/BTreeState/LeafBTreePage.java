@@ -1,5 +1,7 @@
 package flink.state.BTreeState;
 
+import flink.state.BTreeState.util.ArrayUtil;
+import flink.state.BTreeState.util.Search;
 import org.apache.flink.api.java.tuple.Tuple2;
 
 import java.util.ArrayList;
@@ -65,7 +67,7 @@ public class LeafBTreePage<K extends Comparable, V> {
             node.setValue(value);
         } else {
             // else the key does not exist, so insert it into the page
-            insertAt(this.nodes, new BTreeLeafNode<>(key, value), searchResult.f0);
+            ArrayUtil.insertAt(this.nodes, new BTreeLeafNode<>(key, value), searchResult.f0);
         }
 
         // if we inserted at the head of this array
@@ -123,61 +125,22 @@ public class LeafBTreePage<K extends Comparable, V> {
         this.rightSiblingPageId = pageId;
     }
 
-    private boolean isBefore(K it, K that) {
-        return it.compareTo(that) < 0;
-    }
-
-    private void insertAt(ArrayList<BTreeLeafNode<K, V>> arr, BTreeLeafNode<K, V> val, int index) {
-        BTreeLeafNode<K, V> toInsert = val;
-
-        for (int i = index; i < arr.size(); i += 1) {
-            BTreeLeafNode<K, V> toBump = arr.get(index);
-            arr.set(i, toInsert);
-            toInsert = toBump;
-        }
-
-        arr.add(toInsert);
-    }
-
     private Tuple2<Integer, Boolean> search(K key) {
-        int pivotBegin = 0;
-        int pivotEnd = this.nodes.size() - 1;
+        Search.SearchResult result = new Search<>(this.nodes)
+                .doSearch(new BTreeLeafNode<>(key, null),
+                        (it, that) -> {
+                            int compared = it.getKey().compareTo(that.getKey());
+                            if (compared == 0) return Search.Comparison.EQUAL;
+                            if (compared < 0) return Search.Comparison.LESS_THAN;
+                            return Search.Comparison.GREATER_THAN;
+                        });
 
-        K beginKey = this.nodes.get(pivotBegin).getKey();
-        K endKey = this.nodes.get(pivotEnd).getKey();
-
-        if (key.equals(beginKey)) {
-            return Tuple2.of(pivotBegin, true);
-        } else if (key.equals(endKey)) {
-            return Tuple2.of(pivotEnd, true);
-        }
-
-        while (pivotEnd - pivotBegin > 1) {
-            int pivotIx = pivotBegin + ((pivotEnd - pivotBegin) / 2);
-
-            K pivotKey = this.nodes.get(pivotIx).getKey();
-
-            if (key.equals(pivotKey)) {
-                return Tuple2.of(pivotIx, true);
-            } else if (isBefore(key, pivotKey)) {
-                pivotEnd = pivotIx;
-            } else {
-                pivotBegin = pivotIx;
-            }
-        }
-
-        int pivotIx = pivotBegin + ((pivotEnd - pivotBegin) / 2);
-        K pivotKey = this.nodes.get(pivotIx).getKey();
-
-        if (key.equals(pivotKey)) {
-            return Tuple2.of(pivotIx, true);
-        } else if (isBefore(key, pivotKey)){
-            // search failed, but the key belongs before the item currently in the index that we failed at
-            return Tuple2.of(pivotIx, false);
-        } else {
-            // search failed, but the key belongs after then item currently in the index that we failed at
-            return Tuple2.of(pivotIx + 1, false);
-        }
+        if (result.comparisonAtIndex == Search.Comparison.EQUAL)
+            return Tuple2.of(result.index, true);
+        else if (result.comparisonAtIndex == Search.Comparison.LESS_THAN)
+            return Tuple2.of(result.index, false);
+        else
+            return Tuple2.of(result.index + 1, false);
     }
 
     public RecordIterator getIterator(K startingKey) {

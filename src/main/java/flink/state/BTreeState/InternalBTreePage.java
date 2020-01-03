@@ -1,8 +1,11 @@
 package flink.state.BTreeState;
 
+import flink.state.BTreeState.util.ArrayUtil;
+import flink.state.BTreeState.util.Search;
 import org.apache.flink.api.java.tuple.Tuple2;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.Optional;
 
 public class InternalBTreePage<T extends Comparable> {
@@ -32,6 +35,10 @@ public class InternalBTreePage<T extends Comparable> {
         return this.nodes.isEmpty();
     }
 
+    public Iterator<PageId> getChildrenPageIds() {
+        return this.nodes.stream().map(BTreeInternalNode::getChildPage).iterator();
+    }
+
     public PageId getParentPageId() {
         return parentPageId;
     }
@@ -44,17 +51,21 @@ public class InternalBTreePage<T extends Comparable> {
         this.parentPageId = pageId;
     }
 
+    public void setPageId(PageId pageId) {
+        this.pageId = pageId;
+    }
+
     public Optional<T> update(T oldKey, T newKey) {
 
-        Tuple2<Integer, Boolean> searchResult = search(oldKey);
+        Search.SearchResult searchResult = search(oldKey);
 
-        if (!searchResult.f1) {
+        if (searchResult.comparisonAtIndex != Search.Comparison.EQUAL) {
             throw new IllegalArgumentException("Tried to update a key, but the key was not found");
         }
 
-        this.nodes.get(searchResult.f0).setKey(newKey);
+        this.nodes.get(searchResult.index).setKey(newKey);
 
-        if (searchResult.f0 == 0) {
+        if (searchResult.index == 0) {
             return Optional.of(newKey);
         } else {
             return Optional.empty();
@@ -65,21 +76,27 @@ public class InternalBTreePage<T extends Comparable> {
         // find first node which this key comes before in ordering
         // the child page will be "between" the first key it is "less than"
         // and the previous key.
-        Tuple2<Integer, Boolean> searchResult = search(key);
+        Search.SearchResult searchResult = search(key);
 
-        return nodes.get(searchResult.f0).getChildPage();
+        if (searchResult.comparisonAtIndex == Search.Comparison.LESS_THAN) {
+            return this.nodes.get(Math.max(0, searchResult.index - 1)).getChildPage();
+        } else {
+            return this.nodes.get(searchResult.index).getChildPage();
+        }
     }
 
     public Optional<PageId> findPage(T key) {
-        Tuple2<Integer, Boolean> searchResult = search(key);
+        Search.SearchResult searchResult = search(key);
 
         // if the result pointed us to the first page, then
         // make sure the key is actually in range.
-        if (searchResult.f0 == 0 && isBefore(key, this.nodes.get(0).getKey())) {
+        if (searchResult.index == 0 && searchResult.comparisonAtIndex == Search.Comparison.LESS_THAN) {
             return Optional.empty();
+        } else if (searchResult.comparisonAtIndex == Search.Comparison.LESS_THAN) {
+            return Optional.of(this.nodes.get(searchResult.index - 1).getChildPage());
+        } else {
+            return Optional.of(this.nodes.get(searchResult.index).getChildPage());
         }
-
-        return Optional.of(this.nodes.get(searchResult.f0).getChildPage());
     }
 
     public void insert(T key, PageId childPageId) {
@@ -88,17 +105,19 @@ public class InternalBTreePage<T extends Comparable> {
         }
 
         if (this.isEmpty()) {
-            insertAt(this.nodes, new BTreeInternalNode<T>(key, childPageId), 0);
+            ArrayUtil.insertAt(this.nodes, new BTreeInternalNode<T>(key, childPageId), 0);
             return;
         }
 
-        Tuple2<Integer, Boolean> searchResult = search(key);
+        Search.SearchResult searchResult = search(key);
 
-        if (searchResult.f1) {
+        if (searchResult.comparisonAtIndex == Search.Comparison.EQUAL) {
             throw new IllegalArgumentException("attempted to insert node for key that already exists");
+        } else if (searchResult.comparisonAtIndex == Search.Comparison.GREATER_THAN) {
+            ArrayUtil.insertAt(this.nodes, new BTreeInternalNode<>(key, childPageId), searchResult.index + 1);
+        } else {
+            ArrayUtil.insertAt(this.nodes, new BTreeInternalNode<>(key, childPageId), searchResult.index);
         }
-
-        insertAt(this.nodes, new BTreeInternalNode<T>(key, childPageId), searchResult.f0);
     }
 
     public ArrayList<BTreeInternalNode<T>> split() {
@@ -143,52 +162,14 @@ public class InternalBTreePage<T extends Comparable> {
         return it.compareTo(that) < 0;
     }
 
-    private void insertAt(ArrayList<BTreeInternalNode<T>> arr, BTreeInternalNode<T> val, int index) {
-        BTreeInternalNode<T> toInsert = val;
-
-        for (int i = index; i < arr.size(); i += 1) {
-            BTreeInternalNode<T> toBump = arr.get(index);
-            arr.set(i, toInsert);
-            toInsert = toBump;
-        }
-
-        arr.add(toInsert);
-    }
-
-    private Tuple2<Integer, Boolean> search(T key) {
-        int pivotBegin = 0;
-        int pivotEnd = this.nodes.size() - 1;
-
-        T beginKey = this.nodes.get(pivotBegin).getKey();
-        T endKey = this.nodes.get(pivotEnd).getKey();
-
-        if (key.equals(beginKey)) {
-            return Tuple2.of(pivotBegin, true);
-        } else if (key.equals(endKey)) {
-            return Tuple2.of(pivotEnd, true);
-        }
-
-        while (pivotEnd - pivotBegin > 1) {
-            int pivotIx = pivotBegin + ((pivotEnd - pivotBegin) / 2);
-
-            T pivotKey = this.nodes.get(pivotIx).getKey();
-
-            if (key.equals(pivotKey)) {
-                return Tuple2.of(pivotIx, true);
-            } else if (isBefore(key, pivotKey)) {
-                pivotEnd = pivotIx;
-            } else {
-                pivotBegin = pivotIx;
-            }
-        }
-
-        int pivotIx = pivotBegin + ((pivotEnd - pivotBegin) / 2);
-        T pivotKey = this.nodes.get(pivotIx).getKey();
-
-        if (key.equals(pivotKey)) {
-            return Tuple2.of(pivotIx, true);
-        } else {
-            return Tuple2.of(pivotIx, false);
-        }
+    private Search.SearchResult search(T key) {
+        return new Search<>(this.nodes)
+                .doSearch(new BTreeInternalNode<>(key, null),
+                        (it, that) -> {
+                            int compared = it.getKey().compareTo(that.getKey());
+                            if (compared == 0) return Search.Comparison.EQUAL;
+                            if (compared < 0) return Search.Comparison.LESS_THAN;
+                            return Search.Comparison.GREATER_THAN;
+                        });
     }
 }
