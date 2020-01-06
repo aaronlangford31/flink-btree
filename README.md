@@ -32,7 +32,9 @@ Flink tends to perform really well for simple cases in this model. However, when
   - 1 record must be copied and shuffled (sent from one operator to another) for each join it is involved in
 
 ## Enter BTree
-What if we could reduce the number of operators required to perform joins? If we could identify a parent key that would group all records in a set of joins together (like tenant id or shard id), then we might be able to get some good performance gains by using less RocksDB instances and by requiring less shuffles for keys.
+What if we could reduce the number of operators required to perform joins? If we could identify a parent key that would group all records in a set of joins together (like tenant id or shard id), and this parent key could produce partitions of data that could fit on a single machine, then we might be able to get some good performance gains by using less RocksDB instances and by requiring less shuffles for keys.
+
+This is an important assumption and thus it is worth stating again: the sets of data we are looking to join together should be able to share one parent key. So across a CDC stream, HTTP request log stream, and a business event stream, there should be some property that allows me to derive a key that groups things together. This might be a domain name, a region ID, or a shard ID. The point is that all of the data that we are interested in joining must be able to share a common key so that Flink can route the records to the right stateful operator instance in a streaming topology.
 
 In order to accomplish this, we need a data structure in Flink which supports:
 - fast inserts/updates
@@ -57,6 +59,87 @@ Complexity Analysis on BTree (roughly)
 - Internal pages stored in MapState
 - Leaf pages stored in MapState
 - Flink deals with serializing pages of the tree
+
+# Example of Use Case
+Given I want to materialize the following view from a change data capture stream:
+```sql
+SELECT
+    c.id,
+    c.name,
+    e.id,
+    e.enrolled_at,
+    u.id,
+    u.name
+FROM
+    courses c
+INNER JOIN
+    enrollments e ON c.id = e.course_id AND c.shard_id = e.shard_id
+INNER JOIN
+    users u ON u.id = e.user_id AND u.shard_id = e.shard_id
+```
+
+- Courses are one-to-many with enrollments
+- Users are one-to-many with enrollments
+
+Get a unioned stream of all records and key the unioned stream by `shard_id`.
+
+Psuedo-code for each record from the unioned stream:
+```
+tree = initializeTree()
+
+def project(course, enrollment, user):
+    return [
+        course.getField("id"),
+        course.getField("name"),
+        enrollment.getField("id"),
+        enrollment.getField("enrolledAt"),
+        user.getField("id"),
+        user.getField("name")
+    ]
+
+def processElement(el):
+    if isCourse(el):
+        key = "courses-" + el.getField("id")
+        tree.insert(key, el)
+
+        enrollments = tree.getByPrefix("enrollments-course-ix" + el.getField("id"))
+        joinedRecords = enrollments.flatMap(enrollment => 
+            user = tree.get("users-" + enrollment.getField("user_id")
+            return project(el, enrollment, user)
+        )
+
+        return joinedRecords
+
+    if isEnrollment(el):
+        key1 = "enrollments-course-ix-" + el.getField("course_id")  "-" + el.getField("id")
+        key2 = "enrollments-user-ix-" + el.getField("user_id")  "-" + el.getField("id")
+
+        tree.insert(key1, el)
+        tree.insert(key2, el)
+
+        course = tree.get("courses-" + el.getField("course_id"))
+        user = tree.getByPrefix("users-" + el.getField("user_id"))
+
+        return [project(course, el, user)]
+
+    if isUser(el):
+        key = "users-" + el.getField("id")
+
+        tree.insert(key, el)
+
+        enrollments = tree.getByPrefix("enrollments-user-ix" + el.getField("id"))
+        joinedRecords = enrollments.flatMap(enrollment => 
+            course = tree.get("courses-" + enrollment.getField("course_id")
+            return project(course, enrollment, el)
+        )
+        
+        return joinedRecords
+```
+
+For this join, you could probably do better by eagerly projecting each record into it's output, rather than lazily storing each input record in the btree structure. This is possible because the each input can be mapped to the output it belongs to by it's primary key.
+
+# Alternative Approaches
+- RocksDB natively supports a prefix/range scan operation. Work could be done to surface this functionality to the existing managed state APIs.
 
 # Road Map/Wishful Thinking
 In some particular order:
